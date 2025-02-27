@@ -5,4 +5,4 @@ author = "Michael Voronov"
 maintainer = "erg.sg@protonmail.com"
 
 [dependencies]
-neural-fortran = {git = "https://github.com/modern-fortran/neural-fortran"}
+neural-fortran = {git = "https://github.com/OneAdder/neural-fortran", branch = "multihead_attention_optimization"}
