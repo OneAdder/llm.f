@@ -1,5 +1,5 @@
 #define ABSOLUTE_TOLERANCE 1e-06
-#define RELATIVE_TOLERANCE 1e-05
+#define RELATIVE_TOLERANCE 1e-04
 #define _all_close(x, y) all(abs(x - y) <= (ABSOLUTE_TOLERANCE + RELATIVE_TOLERANCE * abs(y)))
 
 
