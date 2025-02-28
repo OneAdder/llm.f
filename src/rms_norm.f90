@@ -6,9 +6,17 @@ module llmf_rmsnorm
     integer :: sequence_length, model_dimension
     real :: eps
     real, allocatable :: gamma(:)
+    real, allocatable :: gradient(:, :)
+    real, allocatable :: dw(:)
     real, allocatable :: output(:, :)
+
+    real, allocatable, private :: sigma(:)
+    real, allocatable, private :: one_over_sigma(:)
+    real, allocatable, private :: gradient_by_gamma_over_sigma(:)
+    real, allocatable, private :: weight_deltas(:, :)
   contains
     procedure :: forward
+    procedure :: backward
     procedure :: init
   end type rmsnorm_layer
 
@@ -37,6 +45,27 @@ contains
     end do
   end subroutine forward
 
+  subroutine backward(self, input, gradient)
+    class(rmsnorm_layer), intent(inout) :: self
+    real :: input(:, :)
+    real :: gradient(:, :)
+    integer :: i
+
+    do concurrent(i = 1: self % sequence_length)
+      self % sigma = sqrt(self % eps + (sum(input(i, :) ** 2) / size(input, 2)))
+      self % one_over_sigma = 1 / self % sigma
+      self % gradient_by_gamma_over_sigma = gradient(i, :) * self % gamma * self % one_over_sigma
+
+      self % weight_deltas(i, :) = gradient(i, :) * input(i, :) * self % one_over_sigma
+      self % gradient(i, :) = self % gradient_by_gamma_over_sigma &
+        - (&
+              sum(input(i, :) * self % gradient_by_gamma_over_sigma * (self % one_over_sigma ** 2))&
+          ) * (input(i, :) / self % model_dimension)
+    end do
+
+    self % dw = sum(self % weight_deltas, dim=1)
+  end subroutine backward
+
   module subroutine init(self, input_shape)
     class(rmsnorm_layer), intent(inout) :: self
     integer, intent(in) :: input_shape(:)
@@ -51,5 +80,14 @@ contains
     ! default initialization from PyTorch
     allocate(self % gamma(self % model_dimension))
     self % gamma = 1.
+
+    allocate(self % gradient(self % sequence_length, self % model_dimension))
+    allocate(self % dw(self % model_dimension))
+
+    ! allocate temp storages
+    allocate(self % sigma(self % model_dimension))
+    allocate(self % one_over_sigma, mold=self % sigma)
+    allocate(self % gradient_by_gamma_over_sigma, mold=self % sigma)
+    allocate(self % weight_deltas, mold=self % gradient)
   end subroutine init
 end module llmf_rmsnorm
