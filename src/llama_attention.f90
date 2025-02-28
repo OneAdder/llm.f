@@ -8,12 +8,18 @@ module llmf_llama_attention
   public :: llama_attention_layer
 
   type, extends(multihead_attention_layer) :: llama_attention_layer
+    !! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_attention.py
     integer :: n_kv_heads, n_kv_groups
+    real, allocatable :: gradient(:, :)
     real, allocatable :: q_temp(:, :, :)
     real, allocatable :: k_temp(:, :, :)
     real, allocatable :: v_temp(:, :, :)
   contains
     procedure :: forward
+    procedure :: backward
+    procedure :: repeat_interleave
+    procedure :: repeat_interleave_backward
+    procedure :: combine_kv_heads
     procedure :: apply_rotary_pos_emb
     procedure :: rotate_half
     procedure :: init => init
@@ -33,6 +39,69 @@ contains
     res % n_heads = n_heads
     res % n_kv_heads = n_kv_heads
   end function llama_attention_layer_cons
+
+  module subroutine backward(self, input, gradient, cosine, sine, attention_mask)
+    class(llama_attention_layer), intent(in out) :: self
+    real, intent(in) :: input(:, :)
+    real, intent(in) :: gradient(:, :)
+    real, intent(in) :: cosine(:, :)
+    real, intent(in) :: sine(:, :)
+    real, intent(in), optional :: attention_mask(:, :)
+
+    self % v_heads = self % v_temp
+    self % k_heads = self % k_temp
+    self % q_heads = self % q_temp
+
+    call self % sdpa_backward(gradient, attention_mask)
+
+    self % k_temp = self % repeat_interleave_backward(self % k_or_dk)
+
+    ! FIXME: implement backward for apply_rotary_pos_emb
+    call self % apply_rotary_pos_emb(self % q_or_dq, self % k_temp, cosine, sine)
+
+    call self % value_layer % backward(&
+        self % v_input,&
+        self % combine_kv_heads(self % repeat_interleave_backward(self % v_or_dv))&
+    )
+    call self % key_layer % backward(&
+        self % k_input,&
+        self % combine_kv_heads(self % k_temp)&
+    )
+    call self % query_layer % backward(self % q_input, self % combine_heads(self % q_or_dq))
+
+    self % gradient = &
+        self % query_layer % gradient &
+        + self % key_layer % gradient &
+        + self % value_layer % gradient
+  end subroutine backward
+
+  module function repeat_interleave_backward(self, gradient) result(res)
+    class(llama_attention_layer), intent(in) :: self
+    real, intent(in) :: gradient(:, :, :)
+    real :: res(size(gradient, 1), size(gradient, 2), size(gradient, 3) / self % n_kv_groups)
+    integer :: reshape_size(2)
+    integer :: i, j
+
+    reshape_size = [size(gradient, 3) / self % n_kv_groups, self % n_kv_groups]
+
+    do concurrent(i = 1: self % sequence_length, j = 1: self % head_size)
+      res(i, j, :) = sum(&
+          reshape(gradient(i, j, :), reshape_size),&
+          dim=1&
+      )
+    end do
+  end function repeat_interleave_backward
+
+  module function combine_kv_heads(self, input) result(output)
+    class(llama_attention_layer), intent(in) :: self
+    real, intent(in) :: input(:, :, :)
+    real :: output(self % sequence_length, self % n_kv_groups * self % n_kv_heads)
+    integer :: seq
+
+    do concurrent(seq = 1: self % sequence_length)
+      output(seq, :) = reshape(transpose(input(seq, :, :)), [size(output, 2)])
+    end do
+  end function combine_kv_heads
 
   module subroutine forward(self, input, cosine, sine, attention_mask)
     !! input: input of Self Attention (sequence_length, model_dimension)
@@ -67,18 +136,23 @@ contains
     ! FIXME: added for memory safety, remove when backward is tested and works without it
     self % q_or_dq = self % q_temp
     ! repeat groups for key to total amount of heads
-    self % k_or_dk = reshape(&
-        spread(self % k_temp, dim=3, ncopies=self % n_kv_groups),&
-        shape(self % q_temp)&
-    )
+    self % k_or_dk = self % repeat_interleave(self % k_temp)
     ! repeat groups for key to total amount of heads
-    self % v_or_dv = reshape(&
-        spread(self % v_temp, dim=3, ncopies=self % n_kv_groups),&
-        shape(self % q_temp)&
-    )
+    self % v_or_dv = self % repeat_interleave(self % v_temp)
 
     call self % sdpa_forward(attention_mask)
   end subroutine forward
+
+  module function repeat_interleave(self, input) result(res)
+    class(llama_attention_layer), intent(in) :: self
+    real, intent(in) :: input(:, :, :)
+    real :: res(size(input, 1), size(input, 2), size(input, 3) * self % n_kv_groups)
+
+    res = reshape(&
+        spread(input, dim=3, ncopies=self % n_kv_groups),&
+        shape(res)&
+    )
+  end function repeat_interleave
 
   module subroutine apply_rotary_pos_emb(self, query, key, cosine, sine)
     class(llama_attention_layer), intent(inout) :: self
@@ -138,8 +212,15 @@ contains
     self % value_layer = linear2d_layer(self % n_kv_heads * self % head_size)
     call self % value_layer % init([self % sequence_length, self % model_dimension])
 
+    allocate(self % gradient(self % sequence_length, self % model_dimension))
+
     allocate(self % q_temp(self % sequence_length, self % head_size, self % n_heads))
     allocate(self % k_temp(self % sequence_length, self % head_size, self % n_kv_heads))
     allocate(self % v_temp(self % sequence_length, self % head_size, self % n_kv_heads))
+
+    deallocate(self % k_heads)
+    allocate(self % k_heads(self % sequence_length, self % head_size, self % n_kv_heads))
+    deallocate(self % v_heads)
+    allocate(self % v_heads(self % sequence_length, self % head_size, self % n_kv_heads))
   end subroutine init
 end module llmf_llama_attention
