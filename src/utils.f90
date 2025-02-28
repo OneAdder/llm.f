@@ -7,9 +7,16 @@ module llmf_utils
   use iso_fortran_env, only: stderr => error_unit
   implicit none
 
+  private
+  public allclose, assert_that, init_kaiming
+
   interface allclose
     procedure :: allclose_1d, allclose_2d, allclose_3d
   end interface allclose
+
+  interface init_kaiming
+    procedure :: init_kaiming_1d, init_kaiming_2d
+  end interface init_kaiming
 
 contains
   function allclose_1d(x, y) result(res)
@@ -46,4 +53,22 @@ contains
       ok = .false.
     end if
   end subroutine assert_that
+
+  subroutine init_kaiming_1d(x, n_prev)
+    !! Kaiming weight initialization
+    real, intent(inout) :: x(:)
+    integer, intent(in) :: n_prev
+    real :: stdv
+    call random_number(x)
+    x = x * sqrt(2. / n_prev)
+  end subroutine init_kaiming_1d
+
+  subroutine init_kaiming_2d(x, n_prev)
+    !! Kaiming weight initialization
+    real, intent(inout) :: x(:, :)
+    integer, intent(in) :: n_prev
+    real :: stdv
+    call random_number(x)
+    x = x * sqrt(2. / n_prev)
+  end subroutine init_kaiming_2d
 end module llmf_utils

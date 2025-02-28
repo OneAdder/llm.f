@@ -7,16 +7,16 @@ program test_llama_attention_layer
   logical :: ok = .true.
 
   call test_rotary_pos(ok)
-  call test_forward(ok)
+  call test_forward_qwen(ok)
   call test_shapes(ok)
-  call test_backward(ok)
+  call test_backward_qwen(ok)
 
   if (.not. ok) then
     write(stderr, '(a)') 'test_llama_attention_layer: one or more tests have failed'
   end if
 
 contains
-  subroutine set_weights(attention)
+  subroutine set_weights_qwen(attention)
     type(llama_attention_layer), intent(inout) :: attention
     attention % query_layer % weights = 0.1
     attention % key_layer % weights = 0.2
@@ -25,8 +25,7 @@ contains
     attention % query_layer % biases = 0.11
     attention % key_layer % biases = 0.11
     attention % value_layer % biases = 0.11
-    attention % output_layer % biases = 0.0
-  end subroutine set_weights
+  end subroutine set_weights_qwen
 
   subroutine test_rotary_pos(ok)
     logical, intent(inout) :: ok
@@ -81,7 +80,7 @@ contains
     call assert_that(allclose(k, expected_key), ok, 'incorrect rotary positional encoding for key')
   end subroutine test_rotary_pos
 
-  subroutine test_forward(ok)
+  subroutine test_forward_qwen(ok)
     logical, intent(inout) :: ok
     type(llama_attention_layer) :: attention
     real :: input(9, 8) = reshape([&
@@ -134,9 +133,9 @@ contains
     causal_mask = 0.
     forall(i = 1: 9, j = 1: 9, i < j) causal_mask(i, j) = -100.
 
-    attention = llama_attention_layer(n_heads=4, n_kv_heads=2)
+    attention = llama_attention_layer(n_heads=4, n_kv_heads=2, is_qwen=.true.)
     call attention % init([9, 8])
-    call set_weights(attention)
+    call set_weights_qwen(attention)
 
     call attention % forward(input, cosine, sine)
     call assert_that(allclose(attention % output, expected_no_mask_output), ok, 'incorrect forward output (no mask)')
@@ -145,7 +144,7 @@ contains
     call assert_that(&
         allclose(attention % output, expected_causal_mask_output), ok, 'incorrect forward output (causal mask)'&
     )
-  end subroutine test_forward
+  end subroutine test_forward_qwen
 
   subroutine test_shapes(ok)
     logical, intent(inout) :: ok
@@ -178,7 +177,7 @@ contains
     )
   end subroutine test_shapes
 
-  subroutine test_backward(ok)
+  subroutine test_backward_qwen(ok)
     logical, intent(inout) :: ok
     type(llama_attention_layer) :: attention
     real :: input(9, 8) = reshape([&
@@ -226,16 +225,16 @@ contains
     causal_mask = 0.
     forall(i = 1: 9, j = 1: 9, i < j) causal_mask(i, j) = -100.
 
-    attention = llama_attention_layer(n_heads=4, n_kv_heads=2)
+    attention = llama_attention_layer(n_heads=4, n_kv_heads=2, is_qwen=.true.)
     call attention % init([9, 8])
-    call set_weights(attention)
+    call set_weights_qwen(attention)
 
     call attention % forward(input, cosine, sine, causal_mask)
     call attention % backward(input, gradient, cosine, sine, causal_mask)
 
     ! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_attention.py
-    print *, attention % gradient
+!    print *, attention % gradient
     ! FIXME: does not apply backward for ropes, so output is slightly off and tests don't pass
     call assert_that(allclose(attention % gradient, expected_gradient), ok, 'incorrect gradient after backward pass')
-  end subroutine test_backward
+  end subroutine test_backward_qwen
 end program test_llama_attention_layer

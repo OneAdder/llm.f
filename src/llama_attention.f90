@@ -10,6 +10,8 @@ module llmf_llama_attention
   type, extends(multihead_attention_layer) :: llama_attention_layer
     !! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_attention.py
     integer :: n_kv_heads, n_kv_groups
+    logical :: is_qwen
+
     real, allocatable :: gradient(:, :)
     real, allocatable :: q_temp(:, :, :)
     real, allocatable :: k_temp(:, :, :)
@@ -26,18 +28,25 @@ module llmf_llama_attention
   end type llama_attention_layer
 
   interface llama_attention_layer
-    module function llama_attention_layer_cons(n_heads, n_kv_heads) result(res)
+    module function llama_attention_layer_cons(n_heads, n_kv_heads, is_qwen) result(res)
       integer, intent(in) :: n_heads, n_kv_heads
+      logical, optional, intent(in) :: is_qwen
       type(llama_attention_layer) :: res
     end function llama_attention_layer_cons
   end interface llama_attention_layer
 
 contains
-  module function llama_attention_layer_cons(n_heads, n_kv_heads) result(res)
+  module function llama_attention_layer_cons(n_heads, n_kv_heads, is_qwen) result(res)
     integer, intent(in) :: n_heads, n_kv_heads
+    logical, optional, intent(in) :: is_qwen
     type(llama_attention_layer) :: res
     res % n_heads = n_heads
     res % n_kv_heads = n_kv_heads
+    if (present(is_qwen)) then
+      res % is_qwen = is_qwen
+    else
+      res % is_qwen = .false.
+    end if
   end function llama_attention_layer_cons
 
   module subroutine backward(self, input, gradient, cosine, sine, attention_mask)
@@ -57,8 +66,9 @@ contains
     self % k_temp = self % repeat_interleave_backward(self % k_or_dk)
 
     ! FIXME: implement backward for apply_rotary_pos_emb
-    call self % apply_rotary_pos_emb(self % q_or_dq, self % k_temp, cosine, sine)
+!    call self % apply_rotary_pos_emb_backward(self % q_or_dq, self % k_temp, cosine, sine)
 
+!    print *, self % v_input
     call self % value_layer % backward(&
         self % v_input,&
         self % combine_kv_heads(self % repeat_interleave_backward(self % v_or_dv))&
@@ -69,6 +79,9 @@ contains
     )
     call self % query_layer % backward(self % q_input, self % combine_heads(self % q_or_dq))
 
+!    print *, self % query_layer % gradient
+!    print *, self % key_layer % gradient
+    print *, self % value_layer % gradient
     self % gradient = &
         self % query_layer % gradient &
         + self % key_layer % gradient &
@@ -116,6 +129,10 @@ contains
 
     real :: k(self % sequence_length, self % head_size, self % n_kv_heads)
     real :: v(self % sequence_length, self % head_size, self % n_kv_heads)
+
+    self % q_input = input
+    self % k_input = input
+    self % v_input = input
 
     call self % query_layer % forward(input)
     call self % key_layer % forward(input)
@@ -206,11 +223,25 @@ contains
     end if
     self % n_kv_groups = self % n_heads / self % n_kv_heads
 
-    !! key and value layers differ from usual MHA, so they need to be reinitialized
-    self % key_layer = linear2d_layer(self % n_kv_heads * self % head_size)
+    ! projection layers differ from usual MHA, so they need to be reinitialized
+    if (self % is_qwen) then
+      ! Qwen has biases for QKV
+      self % query_layer = linear2d_layer(self % model_dimension, biases=.true.)
+      self % key_layer = linear2d_layer(self % n_kv_heads * self % head_size, biases=.true.)
+      self % value_layer = linear2d_layer(self % n_kv_heads * self % head_size, biases=.true.)
+    else
+      ! Llama doesn't
+      self % query_layer = linear2d_layer(self % model_dimension, biases=.false.)
+      self % key_layer = linear2d_layer(self % n_kv_heads * self % head_size, biases=.false.)
+      self % value_layer = linear2d_layer(self % n_kv_heads * self % head_size, biases=.false.)
+    end if
+    ! neither use biases for output
+    self % output_layer = linear2d_layer(self % model_dimension, biases=.false.)
+
+    call self % query_layer % init([self % sequence_length, self % model_dimension])
     call self % key_layer % init([self % sequence_length, self % model_dimension])
-    self % value_layer = linear2d_layer(self % n_kv_heads * self % head_size)
     call self % value_layer % init([self % sequence_length, self % model_dimension])
+    call self % output_layer % init([self % sequence_length, self % model_dimension])
 
     allocate(self % gradient(self % sequence_length, self % model_dimension))
 
