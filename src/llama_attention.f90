@@ -68,7 +68,6 @@ contains
     ! FIXME: implement backward for apply_rotary_pos_emb
 !    call self % apply_rotary_pos_emb_backward(self % q_or_dq, self % k_temp, cosine, sine)
 
-!    print *, self % v_input
     call self % value_layer % backward(&
         self % v_input,&
         self % combine_kv_heads(self % repeat_interleave_backward(self % v_or_dv))&
@@ -79,8 +78,6 @@ contains
     )
     call self % query_layer % backward(self % q_input, self % combine_heads(self % q_or_dq))
 
-!    print *, self % query_layer % gradient
-!    print *, self % key_layer % gradient
     print *, self % value_layer % gradient
     self % gradient = &
         self % query_layer % gradient &
@@ -89,6 +86,12 @@ contains
   end subroutine backward
 
   module function repeat_interleave_backward(self, gradient) result(res)
+    ! backwards pass for `repeat_interleave`
+    ! Example for `gradient` shape (3, 4, 6):
+    ! 1. Split last dimension into three parts (last_graient_dim / self % n_kv_groups = 6 / 2 = 3),
+    !    intermediate shape = (3, 2)
+    ! 2. Sum over the first dim of intermediate shape, getting array of size (2)
+    ! 3. Use this array as the last dimension of output, resulting in (3, 4, 2)
     class(llama_attention_layer), intent(in) :: self
     real, intent(in) :: gradient(:, :, :)
     real :: res(size(gradient, 1), size(gradient, 2), size(gradient, 3) / self % n_kv_groups)
@@ -106,6 +109,7 @@ contains
   end function repeat_interleave_backward
 
   module function combine_kv_heads(self, input) result(output)
+    ! usual `combine_heads` will not work as amount of kv_heads and attention heads may be different
     class(llama_attention_layer), intent(in) :: self
     real, intent(in) :: input(:, :, :)
     real :: output(self % sequence_length, self % n_kv_groups * self % n_kv_heads)
@@ -161,6 +165,7 @@ contains
   end subroutine forward
 
   module function repeat_interleave(self, input) result(res)
+    ! repeat by dimension and write result into that dimension
     class(llama_attention_layer), intent(in) :: self
     real, intent(in) :: input(:, :, :)
     real :: res(size(input, 1), size(input, 2), size(input, 3) * self % n_kv_groups)
