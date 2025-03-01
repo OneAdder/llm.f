@@ -86,7 +86,7 @@ contains
     integer, intent(in) :: input_shape(:)
 
     if (size(input_shape) /= 2) then
-      error stop "RMSNorm Layer accepts 2D input"
+      error stop "Llama Feed Forward Layer accepts 2D input"
     end if
     self % sequence_length = input_shape(1)
     self % model_dimension = input_shape(2)
