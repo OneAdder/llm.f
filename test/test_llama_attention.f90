@@ -10,10 +10,12 @@ program test_llama_attention_layer
   call test_forward_qwen(ok)
   call test_forward_llama(ok)
   call test_shapes(ok)
-!  call test_backward_qwen(ok)
+  call test_backward_qwen(ok)
 
   if (.not. ok) then
-    write(stderr, '(a)') 'test_llama_attention_layer: one or more tests have failed'
+    write(stderr, '(a)') 'test_llama_attention: one or more tests have failed'
+  else
+    print '(a)', 'test_llama_attention: all tests have passed'
   end if
 
 contains

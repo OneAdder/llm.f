@@ -12,6 +12,8 @@ program test_llama_feed_forward
 
   if (.not. ok) then
     write(stderr, '(a)') 'test_llama_feed_forward: one or more tests have failed'
+  else
+    print '(a)', 'test_llama_feed_forward: all tests have passed'
   end if
 
 contains

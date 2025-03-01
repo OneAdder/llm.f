@@ -10,6 +10,8 @@ program test_rmsnorm
 
   if (.not. ok) then
     write(stderr, '(a)') 'test_rmsnorm: one or more tests have failed'
+  else
+    print '(a)', 'test_rmsnorm: all tests have passed'
   end if
 contains
   subroutine test_forward(ok)
