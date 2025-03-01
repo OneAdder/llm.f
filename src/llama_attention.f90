@@ -156,7 +156,6 @@ contains
 
     call self % apply_rotary_pos_emb(query=self % q_temp, key=self % k_temp, cosine=cosine, sine=sine)
 
-    ! FIXME: added for memory safety, remove when backward is tested and works without it
     self % q_or_dq = self % q_temp
     ! repeat groups for key to total amount of heads
     self % k_or_dk = self % repeat_interleave(self % k_temp)
@@ -281,10 +280,5 @@ contains
     allocate(self % q_temp(self % sequence_length, self % head_size, self % n_heads))
     allocate(self % k_temp(self % sequence_length, self % head_size, self % n_kv_heads))
     allocate(self % v_temp(self % sequence_length, self % head_size, self % n_kv_heads))
-
-    deallocate(self % k_heads)
-    allocate(self % k_heads(self % sequence_length, self % head_size, self % n_kv_heads))
-    deallocate(self % v_heads)
-    allocate(self % v_heads(self % sequence_length, self % head_size, self % n_kv_heads))
   end subroutine init
 end module llmf_llama_attention
