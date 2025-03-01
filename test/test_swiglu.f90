@@ -1,4 +1,4 @@
-program test_rmsnorm
+program test_swiglu
   use iso_fortran_env, only: stderr => error_unit
   use llmf_silu, only: silu_layer
   use llmf_utils, only: allclose, assert_that
@@ -30,4 +30,4 @@ contains
     call silu % backward(input, gradient)
     call assert_that(allclose(silu % gradient, expected_gradient), ok, 'silu was calculated incorrectly')
   end subroutine test_silu
-end program test_rmsnorm
+end program test_swiglu
