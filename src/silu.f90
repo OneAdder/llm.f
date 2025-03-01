@@ -27,18 +27,18 @@ contains
     type(silu_layer) :: res
   end function silu_layer_cons
 
-  subroutine forward(self, input)
+  pure subroutine forward(self, input)
     class(silu_layer), intent(inout) :: self
-    real :: input(:)
+    real, intent(in) :: input(:)
 
     self % sigmoid_x = _sigmoid(input)
     self % output = input * self % sigmoid_x
   end subroutine forward
 
-  subroutine backward(self, input, gradient)
+  pure subroutine backward(self, input, gradient)
     class(silu_layer), intent(inout) :: self
-    real :: input(:)
-    real :: gradient(:)
+    real, intent(in) :: input(:)
+    real, intent(in) :: gradient(:)
 
     self % gradient = gradient * (input * self % sigmoid_x * (1. - self % sigmoid_x) + self % sigmoid_x)
   end subroutine backward
