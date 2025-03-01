@@ -1,10 +1,10 @@
-module llmf_swiglu
+module llmf_llama_feed_forward
   use nf_base_layer, only: base_layer
   use nf_linear2d_layer, only: linear2d_layer
   use llmf_silu, only: silu_layer
   implicit none
 
-  type, extends(base_layer) :: swiglu_layer
+  type, extends(base_layer) :: llama_feed_forward_layer
     integer :: sequence_length, intermediate_size, model_dimension
 
     type(silu_layer) :: activation
@@ -24,25 +24,25 @@ module llmf_swiglu
     procedure :: forward
     procedure :: backward
     procedure :: init
-  end type swiglu_layer
+  end type llama_feed_forward_layer
 
-  interface swiglu_layer
-    module function swiglu_layer_cons(intermediate_size) result(res)
+  interface llama_feed_forward_layer
+    module function llama_feed_forward_layer_cons(intermediate_size) result(res)
       integer, intent(in) :: intermediate_size
-      type(swiglu_layer) :: res
-    end function swiglu_layer_cons
-  end interface swiglu_layer
+      type(llama_feed_forward_layer) :: res
+    end function llama_feed_forward_layer_cons
+  end interface llama_feed_forward_layer
 
 contains
-  module function swiglu_layer_cons(intermediate_size) result(res)
+  module function llama_feed_forward_layer_cons(intermediate_size) result(res)
     integer, intent(in) :: intermediate_size
-    type(swiglu_layer) :: res
+    type(llama_feed_forward_layer) :: res
 
     res % intermediate_size = intermediate_size
-  end function swiglu_layer_cons
+  end function llama_feed_forward_layer_cons
 
   subroutine forward(self, input)
-    class(swiglu_layer), intent(inout), target :: self
+    class(llama_feed_forward_layer), intent(inout), target :: self
     real :: input(:, :)
 
     call self % gate_proj % forward(input)
@@ -58,7 +58,7 @@ contains
   end subroutine forward
 
   subroutine backward(self, input, gradient)
-    class(swiglu_layer), intent(inout), target :: self
+    class(llama_feed_forward_layer), intent(inout), target :: self
     real :: input(:, :)
     real :: gradient(:, :)
 
@@ -76,7 +76,7 @@ contains
   end subroutine backward
 
   module subroutine init(self, input_shape)
-    class(swiglu_layer), intent(inout) :: self
+    class(llama_feed_forward_layer), intent(inout) :: self
     integer, intent(in) :: input_shape(:)
 
     if (size(input_shape) /= 2) then
@@ -101,4 +101,4 @@ contains
     allocate(self % hadamard_product_output(self % sequence_length, self % intermediate_size))
     allocate(self % activation_gradient(self % sequence_length, self % intermediate_size))
   end subroutine init
-end module llmf_swiglu
+end module llmf_llama_feed_forward
