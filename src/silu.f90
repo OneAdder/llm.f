@@ -5,11 +5,12 @@ module llmf_silu
   implicit none
 
   type, extends(base_layer) :: silu_layer
+    integer :: sequence_length
     integer :: model_dimension
-    real, allocatable :: gradient(:)
-    real, allocatable :: output(:)
+    real, allocatable :: gradient(:, :)
+    real, allocatable :: output(:, :)
 
-    real, allocatable, private :: sigmoid_x(:)
+    real, allocatable, private :: sigmoid_x(:, :)
   contains
     procedure :: forward
     procedure :: backward
@@ -29,7 +30,7 @@ contains
 
   pure subroutine forward(self, input)
     class(silu_layer), intent(inout) :: self
-    real, intent(in) :: input(:)
+    real, intent(in) :: input(:, :)
 
     self % sigmoid_x = _sigmoid(input)
     self % output = input * self % sigmoid_x
@@ -37,8 +38,8 @@ contains
 
   pure subroutine backward(self, input, gradient)
     class(silu_layer), intent(inout) :: self
-    real, intent(in) :: input(:)
-    real, intent(in) :: gradient(:)
+    real, intent(in) :: input(:, :)
+    real, intent(in) :: gradient(:, :)
 
     self % gradient = gradient * (input * self % sigmoid_x * (1. - self % sigmoid_x) + self % sigmoid_x)
   end subroutine backward
@@ -47,13 +48,14 @@ contains
     class(silu_layer), intent(inout) :: self
     integer, intent(in) :: input_shape(:)
 
-    if (size(input_shape) /= 1) then
-      error stop "Silu Layer accepts 1D input"
+    if (size(input_shape) /= 2) then
+      error stop "Silu Layer accepts 2D input"
     end if
-    self % model_dimension = input_shape(1)
+    self % sequence_length = input_shape(1)
+    self % model_dimension = input_shape(2)
 
-    allocate(self % output(self % model_dimension))
-    allocate(self % gradient(self % model_dimension))
+    allocate(self % output(self % sequence_length, self % model_dimension))
+    allocate(self % gradient(self % sequence_length, self % model_dimension))
 
     ! allocate temp storage for sigmoid output caching
     allocate(self % sigmoid_x, mold=self % output)
