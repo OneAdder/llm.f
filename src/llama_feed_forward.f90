@@ -1,3 +1,4 @@
+!! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_feed_forward.py
 module llmf_llama_feed_forward
   use nf_base_layer, only: base_layer
   use nf_linear2d_layer, only: linear2d_layer
@@ -5,6 +6,11 @@ module llmf_llama_feed_forward
   implicit none
 
   type, extends(base_layer) :: llama_feed_forward_layer
+    !! Feed Forward for Llama architecture
+    !! Differences from reference Transformer Decoder:
+    !! 1. SwiGLU activation (SiLU of Hadamard product of two projections)
+    !! 2. No biases
+    !! Works for both Llama and Qwen2
     integer :: sequence_length, intermediate_size, model_dimension
 
     type(silu_layer) :: activation
