@@ -23,6 +23,7 @@ module llmf_llama_attention
     procedure :: repeat_interleave_backward
     procedure :: combine_kv_heads
     procedure :: apply_rotary_pos_emb
+    procedure :: apply_rotary_pos_emb_backward
     procedure :: rotate_half
     procedure :: init => init
   end type llama_attention_layer
@@ -57,16 +58,15 @@ contains
     real, intent(in) :: sine(:, :)
     real, intent(in), optional :: attention_mask(:, :)
 
-    self % v_heads = self % v_temp
-    self % k_heads = self % k_temp
+    self % v_heads = self % repeat_interleave(self % v_temp)
+    self % k_heads = self % repeat_interleave(self % k_temp)
     self % q_heads = self % q_temp
 
     call self % sdpa_backward(gradient, attention_mask)
 
     self % k_temp = self % repeat_interleave_backward(self % k_or_dk)
-
-    ! FIXME: implement backward for apply_rotary_pos_emb
-!    call self % apply_rotary_pos_emb_backward(self % q_or_dq, self % k_temp, cosine, sine)
+    self % q_temp = self % q_or_dq
+    call self % apply_rotary_pos_emb_backward(self % q_temp, self % k_temp, cosine, sine)
 
     call self % value_layer % backward(&
         self % v_input,&
@@ -76,9 +76,11 @@ contains
         self % k_input,&
         self % combine_kv_heads(self % k_temp)&
     )
-    call self % query_layer % backward(self % q_input, self % combine_heads(self % q_or_dq))
+    call self % query_layer % backward(&
+        self % q_input,&
+        self % combine_heads(self % q_temp)&
+    )
 
-    print *, self % value_layer % gradient
     self % gradient = &
         self % query_layer % gradient &
         + self % key_layer % gradient &
@@ -201,6 +203,32 @@ contains
       key(:, :, head) = (key(:, :, head) * cosine) + (k_rotated(:, :, head) * sine)
     end do
   end subroutine apply_rotary_pos_emb
+
+  module subroutine apply_rotary_pos_emb_backward(self, query, key, cosine, sine)
+    class(llama_attention_layer), intent(inout) :: self
+    real, intent(inout) :: query(:, :, :)
+    !! (sequence_length, head_size, n_heads)
+    real, intent(inout) :: key(:, :, :)
+    !! (sequence_length, head_size, n_kv_heads)
+    real, intent(in) :: cosine(:, :)
+    !! (sequence_length, head_size)
+    real, intent(in) :: sine(:, :)
+    !! (sequence_length, head_size)
+
+    real :: q_rotated(self % sequence_length, self % head_size, self % n_heads)
+    real :: k_rotated(self % sequence_length, self % head_size, self % n_kv_heads)
+    integer :: head, head_dim
+
+    q_rotated = self % rotate_half(query, self % n_heads)
+    do concurrent(head = 1: self % n_heads)
+      query(:, :, head) = (query(:, :, head) * cosine) - (q_rotated(:, :, head) * sine)
+    end do
+
+    k_rotated = self % rotate_half(key, self % n_kv_heads)
+    do concurrent(head = 1: self % n_kv_heads)
+      key(:, :, head) = (key(:, :, head) * cosine) - (k_rotated(:, :, head) * sine)
+    end do
+  end subroutine apply_rotary_pos_emb_backward
 
   pure module function rotate_half(self, input, dim) result(res)
     !! Split head size by two, negate the second part, swap the two parts

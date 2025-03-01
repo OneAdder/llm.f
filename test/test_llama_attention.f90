@@ -310,9 +310,6 @@ contains
     call attention % forward(input, cosine, sine, causal_mask)
     call attention % backward(input, gradient, cosine, sine, causal_mask)
 
-    ! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_attention.py
-!    print *, attention % gradient
-    ! FIXME: does not apply backward for ropes, so output is slightly off and tests don't pass
     call assert_that(&
         allclose(attention % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (qwen)'&
     )
