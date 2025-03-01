@@ -9,12 +9,16 @@ module llmf_swiglu
 
     type(silu_layer) :: activation
 
-    real, pointer :: gradient(:, :)
+    real, allocatable :: gradient(:, :)
     real, pointer :: output(:, :)
 
     type(linear2d_layer) :: gate_proj
     type(linear2d_layer) :: up_proj
     type(linear2d_layer) :: down_proj
+
+    real, allocatable, private :: activation_output(:, :)
+    real, allocatable, private :: hadamard_product_output(:, :)
+    real, allocatable, private :: activation_gradient(:, :)
 
   contains
     procedure :: forward
@@ -40,26 +44,35 @@ contains
   subroutine forward(self, input)
     class(swiglu_layer), intent(inout), target :: self
     real :: input(:, :)
-    integer :: i
 
     call self % gate_proj % forward(input)
     call self % up_proj % forward(input)
 
-    do concurrent(i = 1: self % sequence_length)
-      call self % activation % forward(self % gate_proj % output(i, :))
-      self % gate_proj % output(i, :) = self % activation % output
-    end do
+    call self % activation % forward(self % gate_proj % output)
+    self % activation_output = self % activation % output
+    self % hadamard_product_output = self % activation % output * self % up_proj % output
 
-    call self % down_proj % forward(self % gate_proj % output * self % up_proj % output)
+    call self % down_proj % forward(self % hadamard_product_output)
 
     self % output => self % down_proj % output
   end subroutine forward
 
   subroutine backward(self, input, gradient)
-    class(swiglu_layer), intent(inout) :: self
+    class(swiglu_layer), intent(inout), target :: self
     real :: input(:, :)
     real :: gradient(:, :)
 
+    call self % down_proj % backward(self % hadamard_product_output, gradient)
+
+    call self % activation % backward(&
+        self % gate_proj % output,&
+        self % down_proj % gradient * self % up_proj % output&
+    )
+
+    call self % gate_proj % backward(input, self % activation % gradient)
+    call self % up_proj % backward(input, self % down_proj % gradient * self % activation_output)
+
+    self % gradient = self % up_proj % gradient + self % gate_proj % gradient
   end subroutine backward
 
   module subroutine init(self, input_shape)
@@ -80,6 +93,12 @@ contains
     call self % down_proj % init([self % sequence_length, self % intermediate_size])
 
     self % activation = silu_layer()
-    call self % activation % init([self % intermediate_size])
+    call self % activation % init([self % sequence_length, self % intermediate_size])
+
+    allocate(self % gradient(self % sequence_length, self % model_dimension))
+
+    allocate(self % activation_output(self % sequence_length, self % intermediate_size))
+    allocate(self % hadamard_product_output(self % sequence_length, self % intermediate_size))
+    allocate(self % activation_gradient(self % sequence_length, self % intermediate_size))
   end subroutine init
 end module llmf_swiglu
