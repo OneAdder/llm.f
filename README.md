@@ -22,10 +22,10 @@ fpm build
 | Llama Attention | ✅        | ✅       | ✅        |          |
 | Silu MLP        | ✅        | ✅       | ✅        |          |
 | RMSNorm         | ✅        | ✅       | ✅        |          |
-| Decoder Layer   | ⌛        | ⌛       | ❌        |          |
+| Decoder Layer   | ⌛        | ✅       | ⌛        |          |
 | Llama Model     | ❌        | ❌       | ❌        |          |
-| KV Caching      | ❌        | ❌       | ❌        |          |
-| Text Generation | ❌        | ❌       | ❌        |          |
+| KV Caching      | ❌        | ❌       | -        |          |
+| Text Generation | ❌        | ❌       | -        |          |
 | Training        | ❌        | ❌       | ❌        |          |
 
 ### Infrastructure
