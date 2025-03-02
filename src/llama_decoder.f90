@@ -1,5 +1,5 @@
 ! Qwen Python reference: https://github.com/OneAdder/neural-fortran-references/blob/main/qwen_decoder.py
-
+! Llama Pytohn reference: https://github.com/OneAdder/neural-fortran-references/blob/main/llama_decoder.py
 module llmf_llama_decoder
   use iso_fortran_env, only: stderr => error_unit
   use nf_base_layer, only: base_layer
