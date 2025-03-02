@@ -50,83 +50,36 @@ contains
     end if
   end function llama_attention_layer_cons
 
-  module subroutine backward(self, input, gradient, cosine, sine, attention_mask)
-    class(llama_attention_layer), intent(in out) :: self
-    real, intent(in) :: input(:, :)
-    real, intent(in) :: gradient(:, :)
-    real, intent(in) :: cosine(:, :)
-    real, intent(in) :: sine(:, :)
-    real, intent(in), optional :: attention_mask(:, :)
-
-    self % v_heads = self % repeat_interleave(self % v_temp)
-    self % k_heads = self % repeat_interleave(self % k_temp)
-    self % q_heads = self % q_temp
-
-    call self % sdpa_backward(gradient, attention_mask)
-
-    self % k_temp = self % repeat_interleave_backward(self % k_or_dk)
-    self % q_temp = self % q_or_dq
-    call self % apply_rotary_pos_emb_backward(self % q_temp, self % k_temp, cosine, sine)
-
-    call self % value_layer % backward(&
-        self % v_input,&
-        self % combine_kv_heads(self % repeat_interleave_backward(self % v_or_dv))&
-    )
-    call self % key_layer % backward(&
-        self % k_input,&
-        self % combine_kv_heads(self % k_temp)&
-    )
-    call self % query_layer % backward(&
-        self % q_input,&
-        self % combine_heads(self % q_temp)&
-    )
-
-    self % gradient = &
-        self % query_layer % gradient &
-        + self % key_layer % gradient &
-        + self % value_layer % gradient
-  end subroutine backward
-
-  module function repeat_interleave_backward(self, gradient) result(res)
-    ! backwards pass for `repeat_interleave`
-    ! Example for `gradient` shape (3, 4, 6):
-    ! 1. Split last dimension into three parts (last_graient_dim / self % n_kv_groups = 6 / 2 = 3),
-    !    intermediate shape = (3, 2)
-    ! 2. Sum over the first dim of intermediate shape, getting array of size (2)
-    ! 3. Use this array as the last dimension of output, resulting in (3, 4, 2)
-    class(llama_attention_layer), intent(in) :: self
-    real, intent(in) :: gradient(:, :, :)
-    real :: res(size(gradient, 1), size(gradient, 2), size(gradient, 3) / self % n_kv_groups)
-    integer :: reshape_size(2)
-    integer :: i, j
-
-    reshape_size = [size(gradient, 3) / self % n_kv_groups, self % n_kv_groups]
-
-    do concurrent(i = 1: self % sequence_length, j = 1: self % head_size)
-      res(i, j, :) = sum(&
-          reshape(gradient(i, j, :), reshape_size),&
-          dim=1&
-      )
-    end do
-  end function repeat_interleave_backward
-
-  module function combine_kv_heads(self, input) result(output)
-    ! usual `combine_heads` will not work as amount of kv_heads and attention heads may be different
-    class(llama_attention_layer), intent(in) :: self
-    real, intent(in) :: input(:, :, :)
-    real :: output(self % sequence_length, self % n_kv_groups * self % n_kv_heads)
-    integer :: seq
-
-    do concurrent(seq = 1: self % sequence_length)
-      output(seq, :) = reshape(transpose(input(seq, :, :)), [size(output, 2)])
-    end do
-  end function combine_kv_heads
-
   module subroutine forward(self, input, cosine, sine, attention_mask)
+    !! Args:
     !! input: input of Self Attention (sequence_length, model_dimension)
     !! cosine: cos values of positional encoding (sequence_length, head_size)
     !! sine: sine values of positional encoding (sequence_length, head_size)
     !! attention_mask: attention mask, floating point, not bool (sequence_length, sequence_length)
+    !! What it does:
+    !! 1. Copy inputs into temp storages (similar to `torch.ctx`)
+    !! 2. Forward through in projections
+    !! 3. Split attention heads for query and key-value heads for key and value
+    !! 4. Apply ropes for query and key
+    !! 5. Repeat key-value to the amount to attention heads for key and value
+    !! 6. Store results in `q_or_dq`, `k_or_dk` and `v_or_dv` temp variables
+    !! 7. Forward through Scaled Dot Product Attention
+    !! Graph:
+    !!        input
+    !!     /    |     \
+    !! query   key    value
+    !!   |      |       |
+    !!    linear_forward
+    !!   |      |       |
+    !! split     split_kv
+    !!   |      |       |
+    !!  apply_ropes     |
+    !!   |      |       |
+    !!   |   repeat_kv_heads
+    !!   |      |       |
+    !! scaled_dot_product_attention < attention_mask
+    !!   \      |      /
+    !!        output
     class(llama_attention_layer), intent(inout) :: self
     real, intent(in) :: input(:, :)
     real, intent(in) :: cosine(:, :)
@@ -165,6 +118,69 @@ contains
     call self % sdpa_forward(attention_mask)
   end subroutine forward
 
+  module subroutine backward(self, input, gradient, cosine, sine, attention_mask)
+    !! What it does:
+    !! 1. Repeat key and value input (before ropes) to the amount of attention heads
+    !! 2. Backward through Scaled Dot Product Attention
+    !! 3. Repeat backward (partial sum) for key
+    !! 4. Backward through ropes (cos - sin)
+    !! 5. Repeat backward (partial sum) for value
+    !! 6. Combine heads
+    !! 7. Backward through in projections
+    !! 8. Sum gradients for query, key and value as it is Self Attention
+    !! Graph:
+    !!                            |
+    !! q_heads k_heads v_heads gradient
+    !!    |       |       |       |
+    !!    |     repeat_kv_heads   |
+    !!    |       |       |       |
+    !! scaled_dot_product_attention_backward < attention_mask
+    !!    |       |       |
+    !!   dq      dk      dv
+    !!    |       |       |
+    !!    |    repeat_backward
+    !!    |       |       |
+    !!  ropes_backward    |
+    !!    |       |       |
+    !!     linear_backward
+    !!     \      |      /
+    !!       output = sum
+    class(llama_attention_layer), intent(inout) :: self
+    real, intent(in) :: input(:, :)
+    real, intent(in) :: gradient(:, :)
+    real, intent(in) :: cosine(:, :)
+    real, intent(in) :: sine(:, :)
+    real, intent(in), optional :: attention_mask(:, :)
+
+    self % v_heads = self % repeat_interleave(self % v_temp)
+    self % k_heads = self % repeat_interleave(self % k_temp)
+    self % q_heads = self % q_temp
+
+    call self % sdpa_backward(gradient, attention_mask)
+
+    self % k_temp = self % repeat_interleave_backward(self % k_or_dk)
+    self % q_temp = self % q_or_dq
+    call self % apply_rotary_pos_emb_backward(self % q_temp, self % k_temp, cosine, sine)
+
+    call self % value_layer % backward(&
+        self % v_input,&
+        self % combine_kv_heads(self % repeat_interleave_backward(self % v_or_dv))&
+    )
+    call self % key_layer % backward(&
+        self % k_input,&
+        self % combine_kv_heads(self % k_temp)&
+    )
+    call self % query_layer % backward(&
+        self % q_input,&
+        self % combine_heads(self % q_temp)&
+    )
+
+    self % gradient = &
+        self % query_layer % gradient &
+        + self % key_layer % gradient &
+        + self % value_layer % gradient
+  end subroutine backward
+
   module function repeat_interleave(self, input) result(res)
     ! repeat by dimension and write result into that dimension
     class(llama_attention_layer), intent(in) :: self
@@ -176,6 +192,29 @@ contains
         shape(res)&
     )
   end function repeat_interleave
+
+  module function repeat_interleave_backward(self, gradient) result(res)
+    ! backwards pass for `repeat_interleave`
+    ! Example for `gradient` shape (3, 4, 6):
+    ! 1. Split last dimension into three parts (last_graient_dim / self % n_kv_groups = 6 / 2 = 3),
+    !    intermediate shape = (3, 2)
+    ! 2. Sum over the first dim of intermediate shape, getting array of size (2)
+    ! 3. Use this array as the last dimension of output, resulting in (3, 4, 2)
+    class(llama_attention_layer), intent(in) :: self
+    real, intent(in) :: gradient(:, :, :)
+    real :: res(size(gradient, 1), size(gradient, 2), size(gradient, 3) / self % n_kv_groups)
+    integer :: reshape_size(2)
+    integer :: i, j
+
+    reshape_size = [size(gradient, 3) / self % n_kv_groups, self % n_kv_groups]
+
+    do concurrent(i = 1: self % sequence_length, j = 1: self % head_size)
+      res(i, j, :) = sum(&
+          reshape(gradient(i, j, :), reshape_size),&
+          dim=1&
+      )
+    end do
+  end function repeat_interleave_backward
 
   module subroutine apply_rotary_pos_emb(self, query, key, cosine, sine)
     class(llama_attention_layer), intent(inout) :: self
@@ -242,6 +281,18 @@ contains
     res(:, 1: half, :) = -input(:, half+1: self % head_size, :)
     res(:, half+1: self % head_size, :) = input(:, 1: half, :)
   end function rotate_half
+
+  module function combine_kv_heads(self, input) result(output)
+    ! usual `combine_heads` will not work as amount of kv_heads and attention heads may be different
+    class(llama_attention_layer), intent(in) :: self
+    real, intent(in) :: input(:, :, :)
+    real :: output(self % sequence_length, self % n_kv_groups * self % n_kv_heads)
+    integer :: seq
+
+    do concurrent(seq = 1: self % sequence_length)
+      output(seq, :) = reshape(transpose(input(seq, :, :)), [size(output, 2)])
+    end do
+  end function combine_kv_heads
 
   module subroutine init(self, input_shape)
     class(llama_attention_layer), intent(inout) :: self
