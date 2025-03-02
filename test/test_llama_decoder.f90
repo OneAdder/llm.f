@@ -94,10 +94,9 @@ contains
         'incorrect output after forward pass (qwen)'&
     )
 
-!    call decoder % backward(input, gradient, cosine, sine)
-!
-!    call assert_that(&
-!        allclose(decoder % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (qwen)'&
-!    )
+    call decoder % backward(input, gradient, cosine, sine)
+    call assert_that(&
+        allclose(decoder % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (qwen)'&
+    )
   end subroutine test_decoder_qwen
 end program test_llama_decoder_layer

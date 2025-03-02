@@ -25,7 +25,9 @@ module llmf_llama_decoder
     real, allocatable :: gradient(:, :)
     real, allocatable :: causal_attention_mask(:, :)
 
+    ! it is the second residual, the first residual doesn't need to be copied
     real, allocatable, private :: residual(:, :)
+    real, allocatable, private :: d_residual(:, :)
   contains
     procedure :: forward
     procedure :: backward
@@ -86,6 +88,18 @@ contains
     real, intent(in) :: cosine(:, :)
     real, intent(in) :: sine(:, :)
 
+    call self % feed_forward % backward(self % post_attention_layernorm % output, gradient)
+    call self % post_attention_layernorm % backward(self % residual, self % feed_forward % gradient)
+
+    self % d_residual = self % post_attention_layernorm % gradient + gradient
+    call self % self_attn % backward(&
+        self % input_layernorm % output,&
+        self % d_residual,&
+        cosine, sine, self % causal_attention_mask&
+    )
+    call self % input_layernorm % backward(input, self % self_attn % gradient)
+
+    self % gradient = self % input_layernorm % gradient + self % d_residual
   end subroutine backward
 
   module subroutine init(self, input_shape)
@@ -112,5 +126,6 @@ contains
 
     allocate(self % causal_attention_mask(self % sequence_length, self % sequence_length))
     allocate(self % residual, mold=self % output)
+    allocate(self % d_residual, mold=self % output)
   end subroutine init
 end module llmf_llama_decoder
