@@ -73,7 +73,7 @@ contains
     !!   |      |       |
     !! split     split_kv --store--> q_heads k_heads v_heads
     !!   |      |       |
-    !!  apply_ropes     |
+    !!  apply_ropes <---|---cos,sin
     !!   |      |       |
     !!   |   repeat_kv_heads
     !!   |      |       |
@@ -140,7 +140,7 @@ contains
     !!    |       |       |
     !!    |    repeat_backward
     !!    |       |       |
-    !!  ropes_backward    |
+    !!  ropes_backward <--|---cos,sin
     !!    |       |       |
     !!     linear_backward
     !!     \      |      /
