@@ -21,11 +21,11 @@ module llmf_llama_attention
     procedure :: backward
     procedure :: repeat_interleave
     procedure :: repeat_interleave_backward
-    procedure :: combine_kv_heads
     procedure :: apply_rotary_pos_emb
     procedure :: apply_rotary_pos_emb_backward
     procedure :: rotate_half
-    procedure :: init => init
+    procedure :: combine_kv_heads
+    procedure :: init
   end type llama_attention_layer
 
   interface llama_attention_layer
@@ -71,7 +71,7 @@ contains
     !!   |      |       |
     !!    linear_forward
     !!   |      |       |
-    !! split     split_kv
+    !! split     split_kv --store--> q_heads k_heads v_heads
     !!   |      |       |
     !!  apply_ropes     |
     !!   |      |       |
@@ -129,11 +129,11 @@ contains
     !! 7. Backward through in projections
     !! 8. Sum gradients for query, key and value as it is Self Attention
     !! Graph:
-    !!                            |
-    !! q_heads k_heads v_heads gradient
-    !!    |       |       |       |
-    !!    |     repeat_kv_heads   |
-    !!    |       |       |       |
+    !!    |
+    !! gradient  q_heads k_heads v_heads <--from-stored--
+    !!    |       |        |       |
+    !!    |       |      repeat_kv_heads
+    !!    |       |        |       |
     !! scaled_dot_product_attention_backward < attention_mask
     !!    |       |       |
     !!   dq      dk      dv
