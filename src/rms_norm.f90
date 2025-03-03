@@ -10,8 +10,7 @@ module llmf_rmsnorm
     real, allocatable :: dw(:)
     real, allocatable :: output(:, :)
 
-    real, allocatable, private :: sigma(:)
-    real, allocatable, private :: one_over_sigma(:)
+    real, allocatable, private :: one_over_sigma(:, :)
     real, allocatable, private :: gradient_by_gamma_over_sigma(:)
     real, allocatable, private :: weight_deltas(:, :)
   contains
@@ -39,9 +38,8 @@ contains
     integer :: i
 
     do concurrent(i = 1: self % sequence_length)
-      self % output(i, :) = &
-          (input(i, :) * self % gamma) &
-          / sqrt(self % eps + (sum(input(i, :) ** 2) / size(input, 2)))
+      self % one_over_sigma(i, :) = 1 / sqrt(self % eps + (sum(input(i, :) ** 2) / size(input, 2)))
+      self % output(i, :) = input(i, :) * self % gamma * self % one_over_sigma(i, :)
     end do
   end subroutine forward
 
@@ -52,14 +50,12 @@ contains
     integer :: i
 
     do concurrent(i = 1: self % sequence_length)
-      self % sigma = sqrt(self % eps + (sum(input(i, :) ** 2) / size(input, 2)))
-      self % one_over_sigma = 1 / self % sigma
-      self % gradient_by_gamma_over_sigma = gradient(i, :) * self % gamma * self % one_over_sigma
+      self % gradient_by_gamma_over_sigma = gradient(i, :) * self % gamma * self % one_over_sigma(i, :)
 
-      self % weight_deltas(i, :) = gradient(i, :) * input(i, :) * self % one_over_sigma
+      self % weight_deltas(i, :) = gradient(i, :) * input(i, :) * self % one_over_sigma(i, :)
       self % gradient(i, :) = self % gradient_by_gamma_over_sigma &
         - (&
-              sum(input(i, :) * self % gradient_by_gamma_over_sigma * (self % one_over_sigma ** 2))&
+              sum(input(i, :) * self % gradient_by_gamma_over_sigma * (self % one_over_sigma(i, :) ** 2))&
           ) * (input(i, :) / self % model_dimension)
     end do
 
@@ -85,9 +81,8 @@ contains
     allocate(self % dw(self % model_dimension))
 
     ! allocate temp storages
-    allocate(self % sigma(self % model_dimension))
-    allocate(self % one_over_sigma, mold=self % sigma)
-    allocate(self % gradient_by_gamma_over_sigma, mold=self % sigma)
+    allocate(self % one_over_sigma(self % sequence_length, self % model_dimension))
+    allocate(self % gradient_by_gamma_over_sigma(self % model_dimension))
     allocate(self % weight_deltas, mold=self % gradient)
   end subroutine init
 end module llmf_rmsnorm
