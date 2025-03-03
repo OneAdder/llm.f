@@ -26,10 +26,15 @@ module llmf_rmsnorm
   end interface rmsnorm_layer
 
 contains
-  module function rmsnorm_layer_cons() result(res)
+  module function rmsnorm_layer_cons(eps) result(res)
+    real, optional, intent(in) :: eps
     type(rmsnorm_layer) :: res
 
-    res % eps = 1e-5
+    if (present(eps)) then
+      res % eps = eps
+    else
+      res % eps = 1e-6
+    end if
   end function rmsnorm_layer_cons
 
   subroutine forward(self, input)
