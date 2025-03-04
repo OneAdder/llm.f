@@ -17,16 +17,16 @@ fpm build
 
 ## Progress
 ### ML
-| Layer           | Status   | Forward | Backward | Llama   | Qwen  |
-|-----------------|----------|---------|----------|---------|-------|
-| Llama Attention | ✅        | ✅       | ✅        | ✅       | ✅     |
-| Silu MLP        | ✅        | ✅       | ✅        | ✅       | ✅     |
-| RMSNorm         | ✅        | ✅       | ✅        | ✅       | ✅     |
-| Decoder Layer   | ✅        | ✅       | ✅        | ✅       | ✅     |
-| Llama Model     | ⌛        | ⌛       | ❌        |         |       |
-| KV Caching      | ❌        | ❌       | -        |         |       |
-| Text Generation | ❌        | ❌       | -        |         |       |
-| Training        | ❌        | ❌       | ❌        |         |       |
+| Layer           | Status   | Forward | Backward | Llama | Qwen  |
+|-----------------|----------|---------|----------|-------|-------|
+| Llama Attention | ✅        | ✅       | ✅        | ✅     | ✅     |
+| Silu MLP        | ✅        | ✅       | ✅        | ✅     | ✅     |
+| RMSNorm         | ✅        | ✅       | ✅        | ✅     | ✅     |
+| Decoder Layer   | ✅        | ✅       | ✅        | ✅     | ✅     |
+| Llama Model     | ⌛        | ✅       | ⌛        |       |       |
+| KV Caching      | ❌        | ❌       | -        |       |       |
+| Text Generation | ❌        | ❌       | -        |       |       |
+| Training        | ❌        | ❌       | ❌        |       |       |
 
 ### Infrastructure
 1. Code fo loading safetensors. Will need to make Rust and Fortran friends
