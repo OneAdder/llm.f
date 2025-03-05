@@ -60,9 +60,10 @@ contains
     class(llama_model), intent(inout), target :: self
     integer :: input(:, :)
     logical :: attention_mask(:, :)
-    integer :: batch, pos, layer
+    integer :: batch, pos, layer, i, j
 
     integer :: position_ids(self % sequence_length)
+    real :: causal_attention_mask(self % sequence_length, self % sequence_length, self % batch_size)
     real :: embedding_output(self % sequence_length, self % model_dimension, self % batch_size)
     real :: cosine(self % sequence_length, self % rope % head_size)
     real :: sine(self % sequence_length, self % rope % head_size)
@@ -71,14 +72,27 @@ contains
     do batch = 1, self % batch_size
       position_ids = [(pos, pos=0, self % sequence_length, 1)]
 
+      causal_attention_mask = 0.
+      do concurrent(i = 1: self % sequence_length, j = 1: self % sequence_length)
+        if (i < j .or. .not. attention_mask(j, batch)) then
+          causal_attention_mask(i, j, batch) = -100.
+        else
+          causal_attention_mask(i, j, batch) = 0.
+        end if
+      end do
+
       call self % embed_tokens % forward(input(:, batch))
       embedding_output(:, :, batch) = self % embed_tokens % output
 
       call self % rope % apply(position_ids, cosine, sine)
-      call self % decoder_stack(1) % forward(embedding_output(:, :, batch), cosine, sine)
+      call self % decoder_stack(1) % forward(&
+          embedding_output(:, :, batch), cosine, sine, causal_attention_mask(:, :, batch)&
+      )
       decoder_stack_output(:, :, batch) = self % decoder_stack(1) % output
       do layer = 2, self % n_layers
-        call self % decoder_stack(layer) % forward(decoder_stack_output(:, :, batch), cosine, sine)
+        call self % decoder_stack(layer) % forward(&
+            decoder_stack_output(:, :, batch), cosine, sine, causal_attention_mask(:, :, batch)&
+        )
         decoder_stack_output(:, :, batch) = self % decoder_stack(layer) % output
       end do
       call self % norm % forward(self % decoder_stack(self % n_layers) % output)

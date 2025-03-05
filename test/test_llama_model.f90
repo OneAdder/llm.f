@@ -9,9 +9,9 @@ program test_llama_model
   call test_llama_qwen(ok)
 
   if (.not. ok) then
-    write(stderr, '(a)') 'test_llama_llama: one or more tests have failed'
+    write(stderr, '(a)') 'test_llama: one or more tests have failed'
   else
-    print '(a)', 'test_llama_llama: all tests have passed'
+    print '(a)', 'test_llama: all tests have passed'
   end if
 
 contains
@@ -71,7 +71,6 @@ contains
     call set_weights_qwen(llama)
 
     call llama % forward(input, attention_mask)
-    print *, llama % output
     call assert_that(&
         allclose(llama % output, expected_output), ok,&
         'incorrect output after forward pass (qwen)'&

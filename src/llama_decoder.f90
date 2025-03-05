@@ -23,7 +23,6 @@ module llmf_llama_decoder
 
     real, allocatable :: output(:, :)
     real, allocatable :: gradient(:, :)
-    real, allocatable :: causal_attention_mask(:, :)
 
     ! it is the second residual, the first residual doesn't need to be copied
     real, allocatable, private :: residual(:, :)
@@ -58,21 +57,17 @@ contains
     end if
   end function llama_decoder_layer_cons
 
-  module subroutine forward(self, input, cosine, sine)
+  module subroutine forward(self, input, cosine, sine, attention_mask)
     class(llama_decoder_layer), intent(inout) :: self
     real, intent(in) :: input(:, :)
     real, intent(in) :: cosine(:, :)
     real, intent(in) :: sine(:, :)
+    real, intent(in) :: attention_mask(:, :)
 
     integer :: i, j
 
-    self % causal_attention_mask = 0.
-    forall(i = 1: self % sequence_length, j = 1: self % sequence_length, i < j)
-      self % causal_attention_mask(i, j) = -100.
-    end forall
-
     call self % input_layernorm % forward(input)
-    call self % self_attn % forward(self % input_layernorm % output, cosine, sine, self % causal_attention_mask)
+    call self % self_attn % forward(self % input_layernorm % output, cosine, sine, attention_mask)
     self % residual = self % self_attn % output + input
 
     call self % post_attention_layernorm % forward(self % residual)
@@ -81,12 +76,13 @@ contains
     self % output = self % feed_forward % output + self % residual
   end subroutine forward
 
-  module subroutine backward(self, input, gradient, cosine, sine)
+  module subroutine backward(self, input, gradient, cosine, sine, attention_mask)
     class(llama_decoder_layer), intent(inout) :: self
     real, intent(in) :: input(:, :)
     real, intent(in) :: gradient(:, :)
     real, intent(in) :: cosine(:, :)
     real, intent(in) :: sine(:, :)
+    real, intent(in) :: attention_mask(:, :)
 
     call self % feed_forward % backward(self % post_attention_layernorm % output, gradient)
     call self % post_attention_layernorm % backward(self % residual, self % feed_forward % gradient)
@@ -95,7 +91,7 @@ contains
     call self % self_attn % backward(&
         self % input_layernorm % output,&
         self % d_residual,&
-        cosine, sine, self % causal_attention_mask&
+        cosine, sine, attention_mask&
     )
     call self % input_layernorm % backward(input, self % self_attn % gradient)
 
@@ -124,7 +120,6 @@ contains
     self % post_attention_layernorm = rmsnorm_layer()
     call self % post_attention_layernorm % init([self % sequence_length, self % model_dimension])
 
-    allocate(self % causal_attention_mask(self % sequence_length, self % sequence_length))
     allocate(self % residual, mold=self % output)
     allocate(self % d_residual, mold=self % output)
   end subroutine init

@@ -65,6 +65,8 @@ contains
       0., 0.84147096, 0.9092974, 0.14112, -0.7568025, -0.9589243, -0.2794155, 0.6569866, 0.98935825,&
       0., 0.84147096, 0.9092974, 0.14112, -0.7568025, -0.9589243, -0.2794155, 0.6569866, 0.98935825&
     ], [9, 2])
+    real :: attention_mask(9, 9)
+    integer :: i, j
     real :: gradient(9, 8) = reshape([&
       0.2643, 0.5053, 0.8736, 0.7107, 0.4371, 0.7562, 0.4131, 0.2426, 0.3533,&
       0.4271, 0.8181, 0.9274, 0.3118, 0.4004, 0.7692, 0.8253, 0.8845, 0.5925,&
@@ -97,17 +99,20 @@ contains
       5.0320644, 3.3286667, 5.0550103, 2.6080885, 2.536518, 2.2933505, 0.5795916, 0.49698687, 0.72376704&
     ], [9, 8])
 
+    attention_mask = 0.
+    forall(i = 1: 9, j = 1: 9, i < j) attention_mask(i, j) = -100.
+
     decoder = llama_decoder_layer(intermediate_size=32, n_heads=4, n_kv_heads=2, is_qwen=.true.)
     call decoder % init([9, 8])
     call set_weights_qwen(decoder)
 
-    call decoder % forward(input, cosine, sine)
+    call decoder % forward(input, cosine, sine, attention_mask)
     call assert_that(&
         allclose(decoder % output, expected_output), ok,&
         'incorrect output after forward pass (qwen)'&
     )
 
-    call decoder % backward(input, gradient, cosine, sine)
+    call decoder % backward(input, gradient, cosine, sine, attention_mask)
     call assert_that(&
         allclose(decoder % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (qwen)'&
     )
@@ -135,6 +140,8 @@ contains
       0., 0.84147096, 0.9092974, 0.14112, -0.7568025, -0.9589243, -0.2794155, 0.6569866, 0.98935825,&
       0., 0.84147096, 0.9092974, 0.14112, -0.7568025, -0.9589243, -0.2794155, 0.6569866, 0.98935825&
     ], [9, 2])
+    real :: attention_mask(9, 9)
+    integer :: i, j
     real :: gradient(9, 8) = reshape([&
       0.2643, 0.5053, 0.8736, 0.7107, 0.4371, 0.7562, 0.4131, 0.2426, 0.3533,&
       0.4271, 0.8181, 0.9274, 0.3118, 0.4004, 0.7692, 0.8253, 0.8845, 0.5925,&
@@ -167,17 +174,20 @@ contains
       5.183019, 3.3426788, 4.777372, 2.5616014, 2.3559222, 2.1622102, 0.6462469, 0.5419295, 0.74345064&
     ], [9, 8])
 
+    attention_mask = 0.
+    forall(i = 1: 9, j = 1: 9, i < j) attention_mask(i, j) = -100.
+
     decoder = llama_decoder_layer(intermediate_size=32, n_heads=4, n_kv_heads=2, is_qwen=.false.)
     call decoder % init([9, 8])
     call set_weights_llama(decoder)
 
-    call decoder % forward(input, cosine, sine)
+    call decoder % forward(input, cosine, sine, attention_mask)
     call assert_that(&
         allclose(decoder % output, expected_output), ok,&
         'incorrect output after forward pass (llama)'&
     )
 
-    call decoder % backward(input, gradient, cosine, sine)
+    call decoder % backward(input, gradient, cosine, sine, attention_mask)
     call assert_that(&
         allclose(decoder % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (llama)'&
     )
