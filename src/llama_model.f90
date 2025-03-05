@@ -60,17 +60,21 @@ contains
     class(llama_model), intent(inout), target :: self
     integer :: input(:, :)
     logical :: attention_mask(:, :)
-    integer :: batch, layer
+    integer :: batch, pos, layer
+
+    integer :: position_ids(self % sequence_length)
     real :: embedding_output(self % sequence_length, self % model_dimension, self % batch_size)
     real :: cosine(self % sequence_length, self % rope % head_size)
     real :: sine(self % sequence_length, self % rope % head_size)
     real :: decoder_stack_output(self % sequence_length, self % model_dimension, self % batch_size)
 
     do batch = 1, self % batch_size
+      position_ids = [(pos, pos=0, self % sequence_length, 1)]
+
       call self % embed_tokens % forward(input(:, batch))
       embedding_output(:, :, batch) = self % embed_tokens % output
 
-      call self % rope % apply([0, 1, 2, 3, 4, 5, 6, 7, 8], cosine, sine)
+      call self % rope % apply(position_ids, cosine, sine)
       call self % decoder_stack(1) % forward(embedding_output(:, :, batch), cosine, sine)
       decoder_stack_output(:, :, batch) = self % decoder_stack(1) % output
       do layer = 2, self % n_layers
