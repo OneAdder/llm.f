@@ -72,7 +72,7 @@ contains
 
     call llama % forward(input, attention_mask)
     call assert_that(&
-        allclose(llama % output, expected_output), ok,&
+        allclose(llama % last_hidden_state, expected_output), ok,&
         'incorrect output after forward pass (qwen)'&
     )
 !

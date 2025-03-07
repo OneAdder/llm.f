@@ -2,6 +2,7 @@
 module llmf_llama_model
   use nf_base_layer, only: base_layer
   use nf_embedding_layer, only: embedding_layer
+  use nf_linear2d_layer, only: linear2d_layer
   use llmf_rope, only: rotary_embedding
   use llmf_llama_decoder, only: llama_decoder_layer
   use llmf_rmsnorm, only: rmsnorm_layer
@@ -15,10 +16,13 @@ module llmf_llama_model
     real, allocatable :: gradient(:, :, :)
     real, pointer :: output(:, :, :)
 
+    real, allocatable :: last_hidden_state(:, :, :)
+
     type(embedding_layer) :: embed_tokens
     type(rotary_embedding) :: rope
     type(llama_decoder_layer), allocatable :: decoder_stack(:)
     type(rmsnorm_layer) :: norm
+    type(linear2d_layer) :: lm_head
 
   contains
     procedure :: forward
@@ -96,7 +100,10 @@ contains
         decoder_stack_output(:, :, batch) = self % decoder_stack(layer) % output
       end do
       call self % norm % forward(self % decoder_stack(self % n_layers) % output)
-      self % output(:, :, batch) = self % norm % output
+      self % last_hidden_state(:, :, batch) = self % norm % output
+
+      call self % lm_head % forward(self % norm % output)
+      self % output(:, :, batch) = self % lm_head % output
     end do
   end subroutine forward
 
@@ -142,8 +149,13 @@ contains
     self % norm = rmsnorm_layer()
     call self % norm % init([self % sequence_length, self % model_dimension])
 
+    self % lm_head = linear2d_layer(self % vocab_size, biases=.false.)
+    call self % lm_head % init([self % sequence_length, self % model_dimension])
+
     ! allocate public
-    allocate(self % output(self % sequence_length, self % model_dimension, self % batch_size))
+    allocate(self % output(self % sequence_length, self % vocab_size, self % batch_size))
     allocate(self % gradient(self % sequence_length, self % model_dimension, self % batch_size))
+
+    allocate(self % last_hidden_state(self % sequence_length, self % model_dimension, self % batch_size))
   end subroutine init
 end module llmf_llama_model
