@@ -1,5 +1,10 @@
 !! Python Reference: https://github.com/OneAdder/neural-fortran-references/blob/main/qwen_model.py
+#define BRACKET_NOTATION 3
+#define LAYER_KEY_MAXLEN 100
+
 module llmf_llama_model
+  use iso_fortran_env, only: stderr => error_unit
+  use json_module, only: json_file
   use nf_base_layer, only: base_layer
   use nf_embedding_layer, only: embedding_layer
   use nf_linear2d_layer, only: linear2d_layer
@@ -28,6 +33,8 @@ module llmf_llama_model
     procedure :: forward
     procedure :: backward
     procedure :: init
+    procedure :: init_pretrained
+    procedure :: read_safetensors
   end type llama_model
 
   interface llama_model
@@ -158,4 +165,123 @@ contains
 
     allocate(self % last_hidden_state(self % sequence_length, self % model_dimension, self % batch_size))
   end subroutine init
+
+  module subroutine init_pretrained(self, safetensors_path)
+    class(llama_model), intent(inout) :: self
+    character(len=*), intent(in) :: safetensors_path
+
+    integer(8) :: header_size
+    character(len=:), allocatable :: header
+    integer iunit, ios
+    type(json_file) :: json
+    logical :: is_present
+
+    integer :: start_pos
+    integer :: layer
+    character(len=LAYER_KEY_MAXLEN) :: layer_key
+
+    open(unit=iunit, file=safetensors_path, form='unformatted', access='stream', status='old')
+
+    ! Read the first 64 bits to get header_size and then JSON header itself
+    read(iunit) header_size
+    allocate(character(len=header_size) :: header)
+    read(iunit) header
+    inquire(unit=iunit, pos=start_pos)
+
+    ! parse JSON
+    call json % initialize(path_mode=BRACKET_NOTATION)
+    call json % deserialize(trim(adjustl(header)))
+
+    ! read data from safetensors
+    ! FIXME: at this point we only work with 1D and 2D shapes
+    self % lm_head % weights = self % read_safetensors('lm_head.weight', json, iunit, start_pos)
+    self % embed_tokens % weights = transpose(self % read_safetensors('model.embed_tokens.weight', json, iunit, start_pos))
+    do layer = 1, self % n_layers
+      write(layer_key, '(A,I0)') 'model.layers.', layer - 1
+      self % decoder_stack(layer) % self_attn % query_layer % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.self_attn.q_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % self_attn % key_layer % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.self_attn.k_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % self_attn % value_layer % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.self_attn.v_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % self_attn % output_layer % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.self_attn.o_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % post_attention_layernorm % gamma = pack(&
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.post_attention_layernorm.weight', json, iunit, start_pos&
+          ),&
+          .true.&
+      )
+      self % decoder_stack(layer) % feed_forward % gate_proj % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.mlp.gate_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % feed_forward % up_proj % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.mlp.up_proj.weight', json, iunit, start_pos&
+          )
+      self % decoder_stack(layer) % feed_forward % down_proj % weights = &
+          self % read_safetensors(&
+              trim(adjustl(layer_key)) // '.mlp.down_proj.weight', json, iunit, start_pos&
+          )
+      if (self % is_qwen) then
+        self % decoder_stack(layer) % self_attn % query_layer % biases = pack(&
+            self % read_safetensors(&
+                trim(adjustl(layer_key)) // '.self_attn.q_proj.bias', json, iunit, start_pos&
+            ),&
+            .true.&
+        )
+        self % decoder_stack(layer) % self_attn % key_layer % biases = pack(&
+            self % read_safetensors(&
+                trim(adjustl(layer_key)) // '.self_attn.k_proj.bias', json, iunit, start_pos&
+            ),&
+            .true.&
+        )
+        self % decoder_stack(layer) % self_attn % value_layer % biases = pack(&
+            self % read_safetensors(&
+                trim(adjustl(layer_key)) // '.self_attn.v_proj.bias', json, iunit, start_pos&
+            ),&
+            .true.&
+        )
+      end if
+    end do
+    self % norm % gamma = pack(self % read_safetensors('model.norm.weight', json, iunit, start_pos), .true.)
+  end subroutine init_pretrained
+
+  module function read_safetensors(self, key, json_header, n_unit, start_pos) result(res)
+    class(llama_model), intent(inout) :: self
+    character(len=*) :: key
+    type(json_file), intent(inout) :: json_header
+    integer, intent(in) :: n_unit
+    integer, intent(in) :: start_pos
+    real, allocatable :: res(:, :)
+
+    logical :: is_present
+    integer :: shape_first
+    integer :: shape_second
+    integer :: offset_start
+    integer :: offset_end
+
+    call json_header % get("$['" // key // "']['shape'][1]", shape_first, is_present)
+    if (.not. is_present) then
+      print *, 'Failed to find key ' // key
+      error stop 1
+    end if
+    call json_header % get("$['" // key // "']['shape'][2]", shape_second, is_present)
+    if (.not. is_present) shape_second = 1
+    call json_header % get("$['" // key // "']['data_offsets'][1]", offset_start, is_present)
+    call json_header % get("$['" // key // "']['data_offsets'][2]", offset_end, is_present)
+
+    allocate(res(shape_second, shape_first))
+    read(n_unit, pos=start_pos + offset_start) res
+    rewind(n_unit)
+  end function read_safetensors
 end module llmf_llama_model
