@@ -6,3 +6,4 @@ maintainer = "erg.sg@protonmail.com"
 
 [dependencies]
 neural-fortran = {git = "https://github.com/OneAdder/neural-fortran", branch = "llmf"}
+json-fortran = {git = "https://github.com/jacobwilliams/json-fortran", branch = "master"}
