@@ -7,6 +7,7 @@ program test_llama_model
   logical :: ok = .true.
 
   call test_llama_qwen(ok)
+  call test_pretrained_llama_qwen(ok)
 
   if (.not. ok) then
     write(stderr, '(a)') 'test_llama: one or more tests have failed'
@@ -81,4 +82,27 @@ contains
 !        allclose(llama % gradient, expected_gradient), ok, 'incorrect gradient after backward pass (qwen)'&
 !    )
   end subroutine test_llama_qwen
+
+  subroutine test_pretrained_llama_qwen(ok)
+    logical, intent(inout) :: ok
+    type(llama_model) :: llama
+
+    integer :: input(9, 1) = reshape([641, 9881, 358, 653, 537, 2948, 39244, 448, 10485], [9, 1])
+    logical :: attention_mask(9, 1) = reshape([&
+      .true., .true., .true., .true., .true., .true., .true., .true., .true.&
+    ], [9, 1])
+
+    integer :: expected_output(9) = [96061, 132716, 28067, 26814, 12137, 81383, 89014, 9670, 107854]
+
+    llama = llama_model(vocab_size=151665, n_layers=2, intermediate_size=32, n_heads=4, n_kv_heads=2, is_qwen=.true.)
+    call llama % init([9, 8, 1])
+    ! source: https://huggingface.co/trl-internal-testing/tiny-Qwen2ForCausalLM-2.5
+    call llama % init_pretrained('./test/model.safetensors')
+
+    call llama % forward(input, attention_mask)
+    call assert_that(&
+        all(maxloc(llama % output(:, :, 1), dim=2) == expected_output), ok,&
+        'incorrect generation output after forward pass (qwen)'&
+    )
+  end subroutine test_pretrained_llama_qwen
 end program test_llama_model
